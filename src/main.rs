@@ -1,29 +1,29 @@
 
-// mod mata_infos;
-
 use std::collections::HashMap;
-// use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::prelude::*;
-// use tokio::time::{Duration, delay_for};
 use tokio::net::{TcpStream, TcpListener};
 use tokio::stream::StreamExt;
-// use pyo3::prelude::*;
+use pyo3::prelude::*;
 use httparse::Request;
 use url::Url;
+use pyo3::types::{PyDict, IntoPyDict};
+use std::iter::FromIterator;
 
 
-// use pyo3::wrap_pyfunction;
+type HeaderType = (Box<HashMap<String, Option<String>>>, Vec<(String, String)>);
 
-fn construction_environ(req: Request) -> Box<HashMap<String, Option<String>>> {
+fn construction_environ(req: Request) -> HeaderType {
     let rurl = req.path
         .and_then(|v| { Url::parse(v).ok() })
         .unwrap();
 
-    let other_header_map: HashMap<&str, String> =
-        req.headers
-            .iter()
-            .map(|h| (h.name, String::from_utf8_lossy(h.value).to_string()))
-            .collect();
+    let header_list= req.headers
+        .iter()
+        .map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).to_string()));
+        // .collect();
+
+    let other_header_map: HashMap<String, String> = HashMap::from_iter(header_list.clone());
+
     let host_url = other_header_map
         .get("Host")
         .and_then(|v| { Url::parse(v).ok() })
@@ -41,10 +41,10 @@ fn construction_environ(req: Request) -> Box<HashMap<String, Option<String>>> {
     environ.insert("SERVER_PORT".to_string(), host_url.port().map(|v| v.to_string()));
     environ.insert("SERVER_PROTOCOL".to_string(), req.version.map(|v| v.to_string()));
 
-    return environ;
+    return (environ, header_list.collect::<Vec<(String, String)>>());
 }
 
-async fn get_request(mut stream: TcpStream) -> Box<HashMap<String, Option<String>>> {
+async fn get_request(mut stream: TcpStream) -> HeaderType {
     loop {
         let mut headers = [httparse::EMPTY_HEADER; 16];
         let mut req = httparse::Request::new(&mut headers);
@@ -71,8 +71,13 @@ async fn main() {
 
     let mut incoming = listener.incoming();
     while let Some(stream) = incoming.next().await {
-        let stream = stream.unwrap();
-        let _environ = get_request(stream).await;
+        tokio::spawn(async {
+            let stream = stream.unwrap();
+            let (environ, http_header) = get_request(stream).await;
+            let gil = Python::acquire_gil();
+            let py = gil.python();
+            let environ: &PyDict = (*environ).into_py_dict(py);
+        });
     }
 }
 
