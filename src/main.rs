@@ -1,6 +1,7 @@
 
 // mod mata_infos;
 
+use std::collections::HashMap;
 // use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::prelude::*;
 // use tokio::time::{Duration, delay_for};
@@ -8,22 +9,38 @@ use tokio::net::{TcpStream, TcpListener};
 use tokio::stream::StreamExt;
 // use pyo3::prelude::*;
 use httparse::Request;
-use std::collections::HashMap;
+use url::Url;
+
 
 // use pyo3::wrap_pyfunction;
 
 fn construction_environ(req: Request) -> Box<HashMap<String, Option<String>>> {
-    let mut environ: Box<HashMap<String, Option<String>>> = Box::new(HashMap::new());
-    environ.insert("REQUEST_METHOD".to_string(), req.method.map(|v| v.to_string()));
-    environ.insert("SERVER_PROTOCOL".to_string(), req.version.map(|v| v.to_string()));
-    // environ.insert("PATH_INFO".to_string(), req.path.map(|v| v.to_string()));
-    // println!("method: {:?}", req.method);
-    // println!("path: {:?}", req.path);
-    let _header_map: HashMap<String, Vec<u8>> =
+    let rurl = req.path
+        .and_then(|v| { Url::parse(v).ok() })
+        .unwrap();
+
+    let other_header_map: HashMap<&str, String> =
         req.headers
             .iter()
-            .map(|h| (h.name.to_string(), h.value.to_vec()))
+            .map(|h| (h.name, String::from_utf8_lossy(h.value).to_string()))
             .collect();
+    let host_url = other_header_map
+        .get("Host")
+        .and_then(|v| { Url::parse(v).ok() })
+        .unwrap();
+
+    let mut environ: Box<HashMap<String, Option<String>>> = Box::new(HashMap::new());
+    environ.insert("REQUEST_METHOD".to_string(), req.method.map(&str::to_string));
+    environ.insert("SCRIPT_NAME".to_string(),
+                   rurl.path_segments().iter().last().map(|v| v.clone().collect::<String>()));
+    environ.insert("PATH_INFO".to_string(), Some(rurl.path().to_string()));
+    environ.insert("QUERY_STRING".to_string(), rurl.query().map(&str::to_string));
+    environ.insert("CONTENT_TYPE".to_string(), other_header_map.get("Content-Type").cloned());
+    environ.insert("CONTENT_LENGTH".to_string(), other_header_map.get("Content-Length").cloned());
+    environ.insert("SERVER_NAME".to_string(), host_url.host_str().map(&str::to_string));
+    environ.insert("SERVER_PORT".to_string(), host_url.port().map(|v| v.to_string()));
+    environ.insert("SERVER_PROTOCOL".to_string(), req.version.map(|v| v.to_string()));
+
     return environ;
 }
 

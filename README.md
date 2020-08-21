@@ -1,2 +1,2 @@
 # SpicyCrab
-The using Actix implmented Python WSGI Server
+The using Rust implmented Python WSGI Server
